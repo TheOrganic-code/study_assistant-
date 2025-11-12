@@ -1,27 +1,48 @@
-import openai
-import json
+import google.generativeai as genai
 import os
+import json
+import re
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Configure Gemini API key
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def generate_flashcards(text):
-    """Generate 5 flashcards from text."""
+    """
+    Generate concise Q&A flashcards using Gemini 1.5 Flash.
+    Returns a list of dicts: [{"question": "...", "answer": "..."}]
+    """
     prompt = f"""
-    You are a flashcard generator.
-    Create 5 question-answer pairs from this text.
-    Return JSON like this:
-    [{{"question": "...", "answer": "..."}}]
+    You are a flashcard generator for students.
+    Create 5 concise Q&A pairs from this text.
+
+    Return **only valid JSON**, in this exact format:
+    [
+      {{"question": "What is ...?", "answer": "It is ..."}},
+      ...
+    ]
+
     Text:
     {text}
     """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}]
-    )
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
-    output = response['choices'][0]['message']['content']
     try:
-        return json.loads(output)
-    except:
-        return [{"question": "Parsing failed", "answer": output}]
+        response = model.generate_content(prompt)
+        output = response.text.strip()
+
+        # ✅ Clean markdown/code blocks if Gemini wraps JSON in ```json ... ```
+        output = re.sub(r"```(json)?", "", output).strip("` \n")
+
+        # ✅ Try parsing cleanly
+        flashcards = json.loads(output)
+        if isinstance(flashcards, list):
+            return flashcards
+
+        # ✅ If Gemini returns a dict or malformed text, wrap it safely
+        return [{"question": "Parsing issue", "answer": str(flashcards)}]
+
+    except json.JSONDecodeError:
+        return [{"question": "⚠️ JSON Parsing Failed", "answer": output}]
+    except Exception as e:
+        return [{"question": "⚠️ Gemini API Error", "answer": str(e)}]
