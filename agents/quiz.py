@@ -1,24 +1,66 @@
-import openai, json, os
+import google.generativeai as genai
+import os
+import json
+import re
 
-openai.api_key = os.getenv("OPENAI_API_KEY")
+# Configure Gemini API key securely
+genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 def generate_quiz(text):
-    """Generate 5 multiple-choice questions."""
+    """
+    Generate 5 multiple-choice questions (MCQs) from the given text using Gemini 1.5 Flash.
+
+    Each question should have:
+      - 'question': The question text
+      - 'options': A list of 4 choices
+      - 'answer': The correct option (A/B/C/D)
+
+    Returns: List[dict]
+    """
     prompt = f"""
-    Make 5 multiple-choice questions from this text.
-    Each question should have 4 options and one correct answer.
-    Return JSON like this:
-    [{{"question": "...", "options": ["A", "B", "C", "D"], "answer": "A"}}]
+    You are an expert MCQ generator.
+    Create 5 multiple-choice questions from the text below.
+
+    Each question must have 4 options and 1 correct answer.
+    Return **only valid JSON** in this format:
+    [
+      {{
+        "question": "What is ...?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "answer": "A"
+      }}
+    ]
+
     Text:
     {text}
     """
 
-    response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    output = response['choices'][0]['message']['content']
+    model = genai.GenerativeModel("gemini-1.5-flash")
+
     try:
-        return json.loads(output)
-    except:
-        return [{"question": "Parsing failed", "answer": output}]
+        response = model.generate_content(prompt)
+        output = response.text.strip()
+
+        # 🧹 Remove code blocks (e.g. ```json ... ```)
+        output = re.sub(r"```(json)?", "", output).strip("` \n")
+
+        # ✅ Parse JSON safely
+        quiz_data = json.loads(output)
+        if isinstance(quiz_data, list):
+            # Ensure proper keys exist in each question
+            cleaned = []
+            for q in quiz_data:
+                cleaned.append({
+                    "question": q.get("question", "N/A"),
+                    "options": q.get("options", []),
+                    "answer": q.get("answer", "N/A")
+                })
+            return cleaned
+
+        # Handle non-list responses
+        return [{"question": "Parsing issue", "options": [], "answer": str(quiz_data)}]
+
+    except json.JSONDecodeError:
+        return [{"question": "⚠️ JSON Parsing Failed", "options": [], "answer": output}]
+    except Exception as e:
+        return [{"question": "⚠️ Gemini API Error", "options": [], "answer": str(e)}]
