@@ -1,66 +1,52 @@
-import google.generativeai as genai
-import os
-import json
-import re
-
-# Configure Gemini API key securely
-genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
-
-def generate_quiz(text):
+def generate_quiz(text, context_title="Study Notes"):
     """
-    Generate 5 multiple-choice questions (MCQs) from the given text using Gemini 1.5 Flash.
-
-    Each question should have:
-      - 'question': The question text
-      - 'options': A list of 4 choices
-      - 'answer': The correct option (A/B/C/D)
-
-    Returns: List[dict]
+    Generate 5 relevant multiple-choice questions using Gemini.
+    The questions will be strictly related to the uploaded notes or topic.
     """
     prompt = f"""
-    You are an expert MCQ generator.
-    Create 5 multiple-choice questions from the text below.
+    You are a professional education content generator.
 
-    Each question must have 4 options and 1 correct answer.
-    Return **only valid JSON** in this format:
+    Based on the text provided below, create exactly 5 **high-quality, conceptually relevant multiple-choice questions**.
+    Each question should:
+    - Be related directly to the content (no random general questions)
+    - Have 4 clear and non-overlapping options (A, B, C, D)
+    - Contain one correct answer
+    - Avoid vague or trivial questions
+    - Focus on technical and conceptual understanding
+
+    Return only valid JSON in this format:
     [
       {{
-        "question": "What is ...?",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
-        "answer": "A"
+        "question": "What is the main function of ...?",
+        "options": ["A", "B", "C", "D"],
+        "answer": "C"
       }}
     ]
 
+    Context: {context_title}
     Text:
     {text}
     """
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    model = genai.GenerativeModel("gemini-2.0-flash")
 
     try:
         response = model.generate_content(prompt)
         output = response.text.strip()
+        output = re.sub(r"```json|```", "", output).strip()
+        quiz = json.loads(output)
 
-        # 🧹 Remove code blocks (e.g. ```json ... ```)
-        output = re.sub(r"```(json)?", "", output).strip("` \n")
+        # sanity check: if not valid list
+        if not isinstance(quiz, list):
+            raise ValueError("Gemini output was not valid JSON list.")
 
-        # ✅ Parse JSON safely
-        quiz_data = json.loads(output)
-        if isinstance(quiz_data, list):
-            # Ensure proper keys exist in each question
-            cleaned = []
-            for q in quiz_data:
-                cleaned.append({
-                    "question": q.get("question", "N/A"),
-                    "options": q.get("options", []),
-                    "answer": q.get("answer", "N/A")
-                })
-            return cleaned
+        # optional filter for short or nonsense questions
+        quiz = [q for q in quiz if len(q.get("question", "")) > 15]
+        return quiz
 
-        # Handle non-list responses
-        return [{"question": "Parsing issue", "options": [], "answer": str(quiz_data)}]
-
-    except json.JSONDecodeError:
-        return [{"question": "⚠️ JSON Parsing Failed", "options": [], "answer": output}]
     except Exception as e:
-        return [{"question": "⚠️ Gemini API Error", "options": [], "answer": str(e)}]
+        return [{
+            "question": "Gemini Quiz Generation Error",
+            "options": ["Error", "Check API", "Invalid Key", "Retry"],
+            "answer": "Error"
+        }]
